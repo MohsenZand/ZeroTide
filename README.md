@@ -106,7 +106,7 @@ Things in here worth a closer look:
 ### 1. Clone & install
 
 ```bash
-git clone <your-fork-url> zerotide
+git clone <repo-url> zerotide
 cd zerotide
 npm install
 cd functions && npm install && cd ..
