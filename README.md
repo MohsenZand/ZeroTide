@@ -59,19 +59,19 @@ Each item shows its true delivered price, a step-by-step breakdown (list price, 
 
 ```mermaid
 flowchart LR
-    U([You]) -->|Google sign-in| FE[React app<br/>Firebase Hosting]
-    FE -->|callable fns<br/>ID token| GUARD{{owner-only<br/>auth guard}}
+    U([You]) -->|Google sign-in| FE[React app on Firebase Hosting]
+    FE -->|callable functions| GUARD{{owner-only auth guard}}
     GUARD --> FN[Cloud Functions]
-    FN <--> FS[(Firestore<br/>locked: functions-only)]
-    FN -->|daily 7am + on-demand| AGENT
+    FN <--> FS[(Firestore, functions only)]
+    FN -->|daily and on-demand| AGENT
 
     subgraph AGENT [Agentic price lookup]
       direction TB
-      S[1 · Google Search<br/>find candidates] --> R[2 · urlContext<br/>read real product pages]
-      R --> X[3 · extract price, size,<br/>subscription, shipping, codes]
+      S[1. Google Search, find candidates] --> R[2. urlContext, read product pages]
+      R --> X[3. extract price, size, deals]
     end
 
-    X --> V[Verdict engine<br/>deterministic true-price + buy/wait]
+    X --> V[Verdict engine, true price and buy/wait]
     V --> FS
     V -->|item hits your price| MAIL[Gmail digest]
     MAIL --> U
