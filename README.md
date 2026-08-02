@@ -21,27 +21,18 @@ Sign-in is **owner-only by design** — it keeps the app private and controls AI
 
 ---
 
-## Example
+## Screenshots
 
-What one tracked item looks like — the AI reads the real pages and shows exactly how the price is reached:
+Each item shows its true delivered price, a step-by-step breakdown (list price, subscription, cash back, shipping), "maybe" codes to try, a price-tide chart, and a per-store comparison.
 
-```
-Ninja Air Fryer 4 qt  ·  One-off  ·  at Amazon                    [ Buy now ]
-your price: $80.00
+![ZeroTide dashboard](docs/light.png)
 
-How this price is reached
-  List price                         $99.99
-  Sale                              -$20.00
-  Cash back (5%, Rakuten)            -$4.00
-  ----------------------------------------
-  Absolute price                     $75.99     (free shipping with Prime)
+<details>
+<summary><b>Dark mode</b> (ZeroTide is fully themed)</summary>
 
-Maybe cheaper - codes to try (verify at checkout): none found this time
-```
+![ZeroTide dashboard, dark mode](docs/dark.png)
 
-> Below the number sits a price-tide chart (price over time vs. your target), a
-> "Compare stores" breakdown, and — for items with promos — a list of "maybe" codes
-> to try. See the [live demo](https://zerotide.web.app) for the full interface.
+</details>
 
 ---
 
