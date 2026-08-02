@@ -5,6 +5,7 @@ import { ShoppingProvider, useShopping } from './contexts/ShoppingContext';
 import Navbar from './components/layout/Navbar';
 import Toast from './components/common/Toast';
 import LoginScreen from './components/auth/LoginScreen';
+import LandingPage from './components/landing/LandingPage';
 import DashboardPage from './pages/DashboardPage';
 import SettingsPage from './pages/SettingsPage';
 
@@ -56,9 +57,7 @@ export default function App() {
     return <div className="center-load"><span className="spinner" /> Loading…</div>;
   }
   if (!user) {
-    // theme applied via useTheme so the login screen matches; toggle unused here.
-    void theme; void toggleTheme;
-    return <LoginScreen />;
+    return <LandingPage theme={theme} toggleTheme={toggleTheme} />;
   }
 
   return (
