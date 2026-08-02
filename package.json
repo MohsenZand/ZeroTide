@@ -1,0 +1,28 @@
+{
+  "name": "zerotide",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "An agentic-AI shopping price tracker. Set your price; it watches the web and pings you at the trough.",
+  "author": "Mohsen Zand",
+  "license": "SEE LICENSE IN LICENSE",
+  "scripts": {
+    "dev": "vite --port 5176",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "^10.14.1",
+    "lucide-react": "^0.294.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^3.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.4.23",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "vite": "^8.0.8"
+  }
+}

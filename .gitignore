@@ -1,0 +1,25 @@
+# Environment variables — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Firebase
+.firebase
+firebase-debug.log
+firebase-debug.*.log
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
