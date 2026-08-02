@@ -6,7 +6,7 @@
 ![React](https://img.shields.io/badge/React-18-149eca.svg)
 ![Vite](https://img.shields.io/badge/Vite-8-646cff.svg)
 ![Firebase](https://img.shields.io/badge/Firebase-Functions%20%7C%20Firestore%20%7C%20Hosting-ffa000.svg)
-![Gemini](https://img.shields.io/badge/AI-Gemini%20(agentic%20tools)-4285f4.svg)
+![Gemini](https://img.shields.io/badge/AI-Gemini%20%28agentic%20tools%29-4285f4.svg)
 ![Node](https://img.shields.io/badge/Node-20-339933.svg)
 
 ZeroTide is an **agentic-AI** shopping price tracker. You add *intentions* — "I'd buy this at $X" — and it watches the web for you: an AI agent searches, **opens and reads the actual product pages** to verify the exact size and current price, works out the *true* delivered price (subscription discounts, cashback, shipping), and only tells you to buy when your terms are met. Promo codes are surfaced as clickable "maybe" prices you can try.
