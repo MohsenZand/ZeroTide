@@ -1,4 +1,8 @@
-import { Check, Clock, ExternalLink, Repeat, Wallet, Truck, Tag, Ticket, BadgeCheck } from 'lucide-react';
+import { useState } from 'react';
+import {
+  Check, Clock, ExternalLink, Repeat, Wallet, Truck, Tag, Ticket, BadgeCheck,
+  RefreshCw, ShoppingBag, Pause, Pencil, Trash2, ChevronDown, Store, Crown,
+} from 'lucide-react';
 import { money } from '../../utils/helpers';
 
 // A static, presentational version of an ItemCard for the public landing demo.
@@ -33,6 +37,8 @@ const STEP_ICON = { sub: Repeat, cash: Wallet, ship: Truck, sale: Tag };
 
 export default function DemoCard({ item }) {
   const buy = item.verdict === 'buy';
+  const [showStores, setShowStores] = useState(false);
+  const stores = item.stores || [];
   return (
     <article className={`card ${buy ? 'buy' : ''}`}>
       <div className="card-main">
@@ -104,9 +110,42 @@ export default function DemoCard({ item }) {
 
         <div className="actions">
           {buy && <span className="act" style={{ background: 'var(--good)', color: 'var(--on-accent)', borderColor: 'var(--good)', fontWeight: 600 }}>See where to buy <ExternalLink size={13} /></span>}
-          <span className="act">Check now</span>
-          <span className="act">I bought it</span>
+          <span className="act"><RefreshCw size={13} /> Check now</span>
+          <span className="act"><ShoppingBag size={13} /> I bought it</span>
+          <span className="act"><Pause size={13} /> Snooze</span>
+          <span className="act"><Pencil size={13} /> Edit</span>
+          <span className="act danger" aria-hidden="true"><Trash2 size={13} /></span>
         </div>
+
+        {stores.length > 0 && (
+          <div className="breakdown-wrap">
+            <button className="brk-toggle" onClick={() => setShowStores((s) => !s)} aria-expanded={showStores}>
+              <Store size={13} />
+              {showStores ? 'Hide stores' : `Compare ${stores.length} stores`}
+              <ChevronDown size={14} className={`chev ${showStores ? 'open' : ''}`} />
+            </button>
+            {showStores && (
+              <div className="breakdown">
+                {stores.map((s, i) => (
+                  <div className={`brk-row ${i === 0 ? 'winner' : ''}`} key={s.store}>
+                    <span className="brk-store">
+                      {i === 0 && <Crown size={12} className="crown" />}
+                      {s.store}
+                      {s.official && <BadgeCheck size={12} className="official-ic" />}
+                    </span>
+                    <span className="brk-prices"><b className="tabnum">{money(s.truePrice)}</b></span>
+                    <span className="brk-deals">
+                      {s.chips?.map((c, j) => (
+                        <span className={`deal-chip ${c.cls}`} key={j}>{c.label}</span>
+                      ))}
+                    </span>
+                    <span className="brk-src"><ExternalLink size={12} /></span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card-viz">

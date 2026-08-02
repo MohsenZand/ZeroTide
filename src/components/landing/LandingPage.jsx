@@ -20,17 +20,27 @@ const DEMO_ITEMS = [
     ],
     maybes: [{ code: 'THORNE10', off: 5.00, price: 46.68 }],
     dip: 'dips monthly', spark: [62, 60, 64, 58, 66, 61, 59, 63, 57, 60, 55, 58, 54, 51.68],
+    stores: [
+      { store: 'Thorne.com', official: true, truePrice: 51.68, chips: [{ cls: 'sub', label: '−$13.60' }, { cls: 'cash', label: '5%' }] },
+      { store: 'iHerb', truePrice: 54.40, chips: [{ cls: 'cash', label: '5%' }] },
+      { store: 'Amazon', truePrice: 64.60, chips: [{ cls: 'sub', label: '−$3.40' }] },
+    ],
   },
   {
-    title: 'Momentous Creatine', sub: '90 servings', kind: 'Recurring',
-    store: 'LiveMomentous', official: true, verdict: 'wait', list: 42.99, truePrice: 38.23, target: 35, delivered: true,
-    reason: 'True price $38.23 (delivered) is above your $35.00 — waiting for a free-shipping promo.',
+    title: "Peet's Major Dickason's Blend", sub: 'whole bean, 12 oz', kind: 'Recurring',
+    store: 'Amazon', official: false, verdict: 'wait', list: 14.99, truePrice: 12.10, target: 11,
+    reason: 'True price $12.10 is above your $11.00. It dips monthly with Subscribe & Save, and your saved code could get you there.',
     steps: [
-      { kind: 'sub', label: 'Subscribe & Save 25%', chip: '$10.75 subscribe & save', amount: 10.75, sign: '-' },
-      { kind: 'ship', label: 'Shipping', chip: '+$5.99 ship', amount: 5.99, sign: '+' },
+      { kind: 'sub', label: 'Subscribe & Save 15%', chip: '$2.25 subscribe & save', amount: 2.25, sign: '-' },
+      { kind: 'cash', label: '5% cash back · Rakuten', chip: '5% cash back · Rakuten', amount: 0.64, sign: '-' },
     ],
-    maybes: [{ code: 'TRS', off: 6.45, price: 31.78, yours: true }],
-    dip: 'dips biweekly', spark: [40, 44, 38, 42, 45, 39, 43, 41, 46, 40, 44, 42, 45, 38.23],
+    maybes: [{ code: 'PEET15', off: 1.10, price: 11.00, yours: true }],
+    dip: 'dips monthly', spark: [15.5, 14.9, 15.2, 14.4, 15.0, 13.9, 14.6, 13.5, 14.2, 13.0, 13.6, 12.8, 13.2, 12.10],
+    stores: [
+      { store: 'Amazon', truePrice: 12.10, chips: [{ cls: 'sub', label: '−$2.25' }, { cls: 'cash', label: '5%' }] },
+      { store: "Peet's Coffee", official: true, truePrice: 12.74, chips: [{ cls: 'sub', label: '−$2.25' }] },
+      { store: 'Target', truePrice: 13.49, chips: [] },
+    ],
   },
   {
     title: 'Ninja Air Fryer 4 qt', sub: 'AF101', kind: 'One-off',
@@ -42,6 +52,11 @@ const DEMO_ITEMS = [
     ],
     maybes: [],
     dip: 'dips seasonally', spark: [96, 99, 92, 97, 90, 95, 88, 93, 86, 90, 84, 88, 80, 75.99],
+    stores: [
+      { store: 'Amazon', truePrice: 75.99, chips: [{ cls: 'sale', label: 'sale' }, { cls: 'cash', label: '5%' }] },
+      { store: 'Walmart', truePrice: 78.50, chips: [{ cls: 'sale', label: 'sale' }] },
+      { store: 'Target', truePrice: 79.99, chips: [] },
+    ],
   },
 ];
 

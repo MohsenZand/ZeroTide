@@ -21,6 +21,30 @@ Sign-in is **owner-only by design** — it keeps the app private and controls AI
 
 ---
 
+## Example
+
+What one tracked item looks like — the AI reads the real pages and shows exactly how the price is reached:
+
+```
+Ninja Air Fryer 4 qt  ·  One-off  ·  at Amazon                    [ Buy now ]
+your price: $80.00
+
+How this price is reached
+  List price                         $99.99
+  Sale                              -$20.00
+  Cash back (5%, Rakuten)            -$4.00
+  ----------------------------------------
+  Absolute price                     $75.99     (free shipping with Prime)
+
+Maybe cheaper - codes to try (verify at checkout): none found this time
+```
+
+> Below the number sits a price-tide chart (price over time vs. your target), a
+> "Compare stores" breakdown, and — for items with promos — a list of "maybe" codes
+> to try. See the [live demo](https://zerotide.web.app) for the full interface.
+
+---
+
 ## Features
 
 - **Agentic price lookup** — searches the whole web, then reads real product pages to verify exact size + current price (not just search snippets).
