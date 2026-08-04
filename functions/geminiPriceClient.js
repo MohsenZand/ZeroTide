@@ -14,9 +14,11 @@
 // module inside the async call below (a top-level require() would throw).
 const logger = require("firebase-functions/logger");
 
-// flash-LITE keeps token cost low (page-reading via urlContext is token-heavy).
-// Rolling "latest" alias avoids periodic deprecation of pinned version ids.
-const MODEL = "gemini-flash-lite-latest";
+// Full flash (not lite): lite is too weak at the agentic work — reading the right
+// page, matching the exact size, and returning a real product URL — which regressed
+// price accuracy and links. Grounding (the main cost) is billed per request either
+// way; the daily cap bounds spend. Rolling "latest" alias avoids deprecation.
+const MODEL = "gemini-flash-latest";
 
 function buildPricePrompt(intention, storeNames, zipCode, todayStr, cashbackSources) {
   const cbList = Array.isArray(cashbackSources) ? cashbackSources.filter(Boolean) : [];
@@ -37,12 +39,14 @@ function buildPricePrompt(intention, storeNames, zipCode, todayStr, cashbackSour
   const priorityLine = storeNames.length
     ? `The user PRIORITIZES these stores — always include them when they carry it: ${storeNames.join(", ")}. But do NOT limit your search to them.`
     : `The user has no preferred stores.`;
-  const searchScope = `HOW TO WORK (agentic, but token-frugal — this must stay cheap):
-- Use Google Search results to identify the candidate listings and their prices.
-- Then OPEN and READ (with your URL tool) only the TOP 1-2 most promising product pages — the single
-  cheapest credible candidate, plus the manufacturer's official page — ONLY to confirm the exact
-  size/quantity and current price. Do NOT open more than 2 pages. Rely on search data for the rest.
-- If the read page's size doesn't match the request, use search data to pick a correctly-sized listing.
+  const searchScope = `HOW TO WORK (agentic — accuracy first, but stay reasonably frugal):
+- Use Google Search to identify candidate listings and their prices.
+- Then OPEN and READ (with your URL tool) the 2-3 most promising product pages to CONFIRM the exact
+  size/quantity, the current price, AND the real product URL. You MUST open the page of the store you
+  will report as the cheapest/winner, and put ITS canonical product URL (on that store's own domain)
+  in "sourceUrl" — never a search link.
+- If a read page's size does not match the request exactly, discard it and open the next candidate
+  until you find the correct size, or mark it as a different size.
 
 SEARCH SCOPE — find the genuinely lowest reliable price across the whole web, not just big chains:
 - Consider Google Shopping plus any legitimate retailer, including smaller/online stores.
@@ -261,9 +265,9 @@ async function callGeminiForIntention({ intention, storeNames, zipCode, apiKey, 
       // OPEN and READ the product pages to verify the exact size + current price
       // (instead of trusting search snippets).
       tools: [{ googleSearch: {} }, { urlContext: {} }],
-      // Low temperature for factual, repeatable price extraction; bound output.
+      // Low temperature for factual, repeatable price extraction. No output cap:
+      // this model uses "thinking" tokens, and a low cap truncated the JSON.
       temperature: 0,
-      maxOutputTokens: 2048,
     },
   });
 
