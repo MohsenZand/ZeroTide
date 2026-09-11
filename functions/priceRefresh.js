@@ -2,10 +2,24 @@
  * Price refresh: the heart of ZeroTide.
  *
  * refreshSingleIntention() is the shared core used by both the daily scheduled
- * batch and the manual "check now" callable:
- *   reserve AI budget -> call Gemini (all stores in one grounded request)
- *   -> write one priceHistory snapshot per store -> compute true price + verdict
- *   -> update the intention's denormalized currentBest.
+ * batch and the manual "check now" callable. It picks one of two paths:
+ *
+ *   MONITOR (the default, ~free)
+ *     We already know which pages sell this item. Re-read those pages directly
+ *     — structured data where the retailer publishes it, otherwise a cheap model
+ *     reading the condensed page. No Google Search, so nothing is billed per
+ *     query. This is what runs on almost every check.
+ *
+ *   DISCOVER (rare, billed)
+ *     Grounded search across the web for who sells this and at what price. Run
+ *     when the item is new, when we have no usable page for it, when monitoring
+ *     comes back empty, or on a periodic sweep to catch cheaper sellers we have
+ *     never seen. Afterwards every discovered price is re-read from its own page
+ *     so the stored number is one we verified, not one the model reported.
+ *
+ * Either way: write one priceHistory snapshot per store -> derive price context
+ * from observed history -> compute true price + verdict -> update the
+ * intention's denormalized currentBest.
  */
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
@@ -15,8 +29,10 @@ const admin = require("firebase-admin");
 const logger = require("firebase-functions/logger");
 
 const { callGeminiForIntention } = require("./geminiPriceClient");
-const { reserveAiCallBudget } = require("./aiBudget");
-const { evaluate } = require("./verdict");
+const { reserveAiCallBudget, recordGroundedSearches } = require("./aiBudget");
+const { readStorePrice } = require("./priceExtract");
+const { derivePriceContext } = require("./priceStats");
+const { evaluate, computeTruePrice } = require("./verdict");
 const { loadSettings } = require("./settings");
 const { sendBuyNowDigest, gmailSecrets } = require("./notify");
 const { assertOwner } = require("./auth");
@@ -26,49 +42,94 @@ const db = admin.firestore();
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 
-async function refreshSingleIntention(intentionId, { triggeredBy, runId }) {
+const MAX_MONITORED_STORES = 5;
+const PAGE_CONCURRENCY = 3; // polite: never hammer several pages of one retailer at once
+
+async function refreshSingleIntention(intentionId, { triggeredBy, runId, mode } = {}) {
   const ref = db.collection("intentions").doc(intentionId);
   const snap = await ref.get();
   if (!snap.exists) throw new Error(`Intention ${intentionId} not found`);
   const intention = { id: snap.id, ...snap.data() };
 
   const settings = await loadSettings();
-  // Priority stores = the item's own stores PLUS the global preferred list (union,
-  // item's first). These are only priorities — the prompt still searches the whole
-  // web, so adding a store augments rather than restricts the search.
-  const globalStores = (settings.preferredStores || []).map((s) => s.name);
-  const itemStores = Array.isArray(intention.stores) ? intention.stores : [];
-  // Fewer priority stores = fewer page reads = lower token cost (search still spans the web).
-  const storeNames = [...new Set([...itemStores, ...globalStores])].slice(0, 5);
+  const apiKey = geminiApiKey.value();
 
-  // Reserve budget BEFORE the (billable) grounded call.
-  await reserveAiCallBudget(db);
+  const known = knownStorePages(intention);
+  const wantsDiscovery =
+    mode === "discover" ||
+    known.length === 0 ||
+    isRediscoveryDue(intention, settings);
 
-  let aiResult;
-  try {
-    aiResult = await callGeminiForIntention({
-      intention,
-      storeNames,
-      zipCode: settings.zipCode,
-      apiKey: geminiApiKey.value(),
-      cashbackSources: settings.cashbackSources,
-    });
-  } catch (err) {
-    logger.error("Gemini call failed", { intentionId, error: err.message });
-    await ref.set(
-      { lastError: err.message, lastCheckedAt: admin.firestore.FieldValue.serverTimestamp() },
-      { merge: true }
-    );
-    throw err;
+  let aiResult = null;
+  let usedPath = null;
+
+  // ── MONITOR ──────────────────────────────────────────────────────────────
+  if (!wantsDiscovery) {
+    const monitored = await monitorKnownPages({ intention, known, settings, apiKey });
+    if (monitored.length) {
+      aiResult = {
+        itemQueried: intention.title,
+        asOfDate: new Date().toISOString().split("T")[0],
+        results: monitored,
+        // Carry the last estimate forward only as a fallback — derivePriceContext
+        // prefers measured history and will override it once there is enough.
+        priceContext: intention.priceContext || {},
+      };
+      usedPath = "monitor";
+    } else {
+      logger.info("Monitoring found no readable page, falling back to discovery", { intentionId });
+    }
   }
 
-  // Read recent history for the "near historical low" check.
-  const histSnap = await ref
-    .collection("priceHistory")
-    .orderBy("checkedAt", "desc")
-    .limit(60)
-    .get();
+  // ── DISCOVER ─────────────────────────────────────────────────────────────
+  if (!aiResult) {
+    await reserveAiCallBudget(db); // reserve BEFORE the billable grounded call
+
+    const globalStores = (settings.preferredStores || []).map((s) => s.name);
+    const itemStores = Array.isArray(intention.stores) ? intention.stores : [];
+    const storeNames = [...new Set([...itemStores, ...globalStores])].slice(0, MAX_MONITORED_STORES);
+
+    try {
+      aiResult = await callGeminiForIntention({
+        intention,
+        storeNames,
+        zipCode: settings.zipCode,
+        apiKey,
+        cashbackSources: settings.cashbackSources,
+      });
+    } catch (err) {
+      logger.error("Gemini call failed", { intentionId, error: err.message });
+      await ref.set(
+        { lastError: err.message, lastCheckedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+      throw err;
+    }
+
+    await recordGroundedSearches(db, aiResult.usage?.searchCount || 0);
+
+    // Confirm each discovered price against the seller's own page. Discovery
+    // tells us where to look; the page tells us the number.
+    aiResult.results = await confirmDiscoveredPrices({ intention, results: aiResult.results, settings, apiKey });
+    usedPath = "discover";
+  }
+
+  // Read recent history for the "near historical low" check and for measuring
+  // this item's real price band.
+  const histSnap = await ref.collection("priceHistory").orderBy("checkedAt", "desc").limit(180).get();
   const history = histSnap.docs.map((d) => d.data());
+
+  // Price context from what we actually observed, not what a model guessed.
+  const cheapestNow = aiResult.results
+    .map((r) => computeTruePrice(r))
+    .filter(Boolean)
+    .map((tp) => tp.truePrice)
+    .sort((a, b) => a - b)[0];
+  aiResult.priceContext = derivePriceContext({
+    history,
+    aiContext: aiResult.priceContext,
+    currentPrice: cheapestNow,
+  });
 
   const { currentBest, verdict, verdictReason, savings, stores } = evaluate({ intention, aiResult, history });
 
@@ -79,7 +140,6 @@ async function refreshSingleIntention(intentionId, { triggeredBy, runId }) {
   // Persist one snapshot per store result.
   const now = admin.firestore.FieldValue.serverTimestamp();
   const batch = db.batch();
-  const { computeTruePrice } = require("./verdict");
   for (const r of aiResult.results) {
     const tp = computeTruePrice(r);
     const histRef = ref.collection("priceHistory").doc();
@@ -104,7 +164,12 @@ async function refreshSingleIntention(intentionId, { triggeredBy, runId }) {
       sourceUrl: r.sourceUrl,
       sourceTitle: r.sourceTitle,
       notes: r.notes,
+      // How this number was obtained, kept per snapshot so the history is
+      // auditable after the fact.
+      provenanceMethod: r.provenance?.method || null,
+      provenanceVerified: Boolean(r.provenance?.verified),
       triggeredBy,
+      checkPath: usedPath,
     });
   }
 
@@ -115,15 +180,146 @@ async function refreshSingleIntention(intentionId, { triggeredBy, runId }) {
     savings,
     latestStores: stores,
     priceContext: aiResult.priceContext,
+    pageCache: collectPageCache(aiResult.results),
+    lastCheckPath: usedPath,
     lastError: null,
     lastCheckedAt: now,
     updatedAt: now,
   };
+  if (usedPath === "discover") update.lastDiscoveryAt = now;
   if (triggeredBy === "manual") update.lastManualCheckAt = now;
   batch.set(ref, update, { merge: true });
   await batch.commit();
 
-  return { currentBest, verdict, verdictReason, savings, stores };
+  return { currentBest, verdict, verdictReason, savings, stores, checkPath: usedPath };
+}
+
+// ── Path selection ───────────────────────────────────────────────────────────
+
+/**
+ * Pages we can re-read without searching: whatever the last check resolved to a
+ * real on-domain product URL. `latestStores` already holds these, cheapest first.
+ */
+function knownStorePages(intention) {
+  const seen = new Set();
+  const out = [];
+
+  const push = (store, sourceUrl, previous) => {
+    if (!store || !sourceUrl || seen.has(sourceUrl)) return;
+    seen.add(sourceUrl);
+    out.push({ store, url: sourceUrl, previous: previous || null });
+  };
+
+  for (const s of intention.latestStores || []) {
+    if (s.found && s.sourceUrl) push(s.store, s.sourceUrl, s);
+  }
+  if (intention.currentBest?.sourceUrl) {
+    push(intention.currentBest.store, intention.currentBest.sourceUrl, intention.currentBest);
+  }
+  return out.slice(0, MAX_MONITORED_STORES);
+}
+
+/**
+ * Monitoring only ever re-checks sellers we already found. A periodic grounded
+ * sweep is what catches a cheaper seller that appeared since — without it the
+ * app would quietly lock onto whoever won on day one.
+ */
+function isRediscoveryDue(intention, settings) {
+  const everyDays = typeof settings.rediscoverEveryDays === "number" ? settings.rediscoverEveryDays : 30;
+  if (everyDays <= 0) return false;
+  const last = intention.lastDiscoveryAt?.toDate
+    ? intention.lastDiscoveryAt.toDate()
+    : intention.lastDiscoveryAt
+      ? new Date(intention.lastDiscoveryAt)
+      : null;
+  if (!last) return true;
+  return (Date.now() - last.getTime()) / 86400000 >= everyDays;
+}
+
+// ── The two paths ────────────────────────────────────────────────────────────
+
+async function monitorKnownPages({ intention, known, settings, apiKey }) {
+  const cache = Array.isArray(intention.pageCache) ? intention.pageCache : [];
+  const cacheFor = (url) => cache.find((c) => c.url === url) || null;
+
+  const results = await mapLimit(known, PAGE_CONCURRENCY, async ({ store, url, previous }) => {
+    try {
+      return await readStorePrice({
+        intention,
+        store,
+        url,
+        zipCode: settings.zipCode,
+        apiKey,
+        previous,
+        cache: cacheFor(url),
+      });
+    } catch (err) {
+      logger.warn("Page monitor failed for store", { store, url, error: err.message });
+      return null;
+    }
+  });
+
+  return results.filter(Boolean);
+}
+
+/**
+ * Re-read every discovered listing from its own page. Where the page and the
+ * model disagree, the page wins — that is the whole point. Results we cannot
+ * re-read keep the discovered figures, still flagged unverified.
+ */
+async function confirmDiscoveredPrices({ intention, results, settings, apiKey }) {
+  return mapLimit(results || [], PAGE_CONCURRENCY, async (r) => {
+    if (!r.found || !r.sourceUrl || typeof r.price !== "number") return r;
+    try {
+      const confirmed = await readStorePrice({
+        intention,
+        store: r.store,
+        url: r.sourceUrl,
+        zipCode: settings.zipCode,
+        apiKey,
+        previous: r,
+      });
+      if (!confirmed || typeof confirmed.price !== "number") return r;
+
+      if (Math.abs(confirmed.price - r.price) > 0.01) {
+        logger.info("Page read disagreed with discovery; trusting the page", {
+          store: r.store,
+          discovered: r.price,
+          onPage: confirmed.price,
+        });
+      }
+      // `confirmed` is already the right merge: readStorePrice was handed this
+      // discovery result as `previous`, so it keeps discovery's coupons,
+      // cashback and how-to steps (facts that aren't printed on the page) while
+      // its hard numbers come from the page itself.
+      return { ...confirmed, notes: confirmed.notes || r.notes || null };
+    } catch (err) {
+      logger.warn("Could not confirm discovered price", { store: r.store, error: err.message });
+      return r;
+    }
+  });
+}
+
+/** Per-URL ETag/Last-Modified so tomorrow's check can ask for a cheap 304. */
+function collectPageCache(results) {
+  return (results || [])
+    .filter((r) => r.cache && r.sourceUrl && (r.cache.etag || r.cache.lastModified))
+    .map((r) => ({ url: r.sourceUrl, etag: r.cache.etag || null, lastModified: r.cache.lastModified || null }))
+    .slice(0, MAX_MONITORED_STORES);
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 // ── Scheduled daily batch ────────────────────────────────────────────────────
@@ -153,11 +349,13 @@ exports.scheduledPriceRefresh = onSchedule(
       .map((d) => d.id);
     const errors = [];
     let processed = 0;
+    const paths = { monitor: 0, discover: 0 };
 
     for (const id of ids) {
       try {
-        await refreshSingleIntention(id, { triggeredBy: "scheduled", runId });
+        const res = await refreshSingleIntention(id, { triggeredBy: "scheduled", runId });
         processed += 1;
+        if (res.checkPath) paths[res.checkPath] = (paths[res.checkPath] || 0) + 1;
       } catch (err) {
         errors.push({ intentionId: id, message: err.message });
         logger.warn("Scheduled refresh item failed", { id, error: err.message });
@@ -195,10 +393,18 @@ exports.scheduledPriceRefresh = onSchedule(
       triggeredBy: "scheduled",
       itemsProcessed: processed,
       itemsFailed: errors.length,
+      itemsMonitored: paths.monitor || 0,
+      itemsDiscovered: paths.discover || 0,
       itemIds: ids,
       errors,
     });
-    logger.info("Scheduled refresh complete", { runId, processed, failed: errors.length });
+    logger.info("Scheduled refresh complete", {
+      runId,
+      processed,
+      failed: errors.length,
+      monitored: paths.monitor || 0,
+      discovered: paths.discover || 0,
+    });
   }
 );
 
@@ -207,7 +413,7 @@ exports.checkIntentionNow = onCall(
   { region: "us-central1", cors: true, invoker: "public", secrets: [geminiApiKey], timeoutSeconds: 240, memory: "512MiB" },
   async (request) => {
     assertOwner(request);
-    const { id } = request.data || {};
+    const { id, rediscover } = request.data || {};
     if (!id) throw new HttpsError("invalid-argument", "Missing intention id.");
 
     const ref = db.collection("intentions").doc(id);
@@ -227,7 +433,12 @@ exports.checkIntentionNow = onCall(
     }
 
     try {
-      const result = await refreshSingleIntention(id, { triggeredBy: "manual" });
+      const result = await refreshSingleIntention(id, {
+        triggeredBy: "manual",
+        // "Search again" explicitly asks for a fresh grounded sweep; a plain
+        // "Check now" just re-reads the pages we know, which costs nothing.
+        mode: rediscover ? "discover" : undefined,
+      });
       return { success: true, ...result };
     } catch (err) {
       if (err instanceof HttpsError) throw err;

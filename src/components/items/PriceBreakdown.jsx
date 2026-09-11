@@ -1,5 +1,5 @@
-import { Ticket, Wallet, Repeat, ArrowDown, ExternalLink, Truck, AlertTriangle } from 'lucide-react';
-import { money, shopUrl } from '../../utils/helpers';
+import { Ticket, Wallet, Repeat, ArrowDown, ExternalLink, Truck, AlertTriangle, FileSearch, Search } from 'lucide-react';
+import { money, shopUrl, provenanceMeta, timeAgo } from '../../utils/helpers';
 
 // Shows the absolute (verified) price step-by-step, then the "maybe" prices you
 // could reach with promo codes. Every finding is a clickable link.
@@ -28,7 +28,8 @@ export default function PriceBreakdown({ best, title, userCoupons = [] }) {
   });
   const suggestions = [...mine, ...aiSuggestions].sort((a, b) => (a.maybePrice ?? 1e9) - (b.maybePrice ?? 1e9));
 
-  const hasAnything = applied > 0 || rate > 0 || shipping > 0 || suggestions.length > 0;
+  const prov = provenanceMeta(best.provenance);
+  const hasAnything = applied > 0 || rate > 0 || shipping > 0 || suggestions.length > 0 || prov;
   if (!hasAnything) return null;
   // A code's proof link, or a search for the code so it's always clickable.
   const codeLink = (c) => c.url || shopUrl(`${title || ''} promo code ${c.code}`);
@@ -108,6 +109,22 @@ export default function PriceBreakdown({ best, title, userCoupons = [] }) {
       )}
 
       {best.howToGetPrice && <div className="pb-how">{best.howToGetPrice}</div>}
+
+      {prov && (
+        <div className={`pb-prov ${prov.verified ? 'verified' : 'unverified'}`}>
+          {prov.verified ? <FileSearch size={12} /> : <Search size={12} />}
+          <span>
+            {prov.verified ? 'Price ' : 'Price '}
+            {prov.label}
+            {prov.readAt ? ` · ${timeAgo(prov.readAt)}` : ''}
+          </span>
+          {best.provenance?.evidenceUrl && (
+            <a href={best.provenance.evidenceUrl} target="_blank" rel="noopener noreferrer" className="pb-link" title="Open the page this price was read from">
+              <ExternalLink size={11} />
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }

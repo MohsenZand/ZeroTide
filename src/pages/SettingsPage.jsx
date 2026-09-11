@@ -11,6 +11,7 @@ export default function SettingsPage() {
   const [stores, setStores] = useState([]);
   const [cooldown, setCooldown] = useState(20);
   const [maxCalls, setMaxCalls] = useState(60);
+  const [rediscoverDays, setRediscoverDays] = useState(30);
   const [cashbackSources, setCashbackSources] = useState([]);
   const [notifyEmail, setNotifyEmail] = useState('');
   const [notifyEnabled, setNotifyEnabled] = useState(false);
@@ -24,6 +25,7 @@ export default function SettingsPage() {
     setStores(settings.preferredStores || []);
     setCooldown(settings.manualCheckCooldownMinutes ?? 20);
     setMaxCalls(settings.maxDailyAiCalls ?? 60);
+    setRediscoverDays(settings.rediscoverEveryDays ?? 30);
     setCashbackSources(settings.cashbackSources || []);
     setNotifyEmail(settings.notifyEmail || '');
     setNotifyEnabled(Boolean(settings.notifyEnabled));
@@ -42,6 +44,7 @@ export default function SettingsPage() {
         preferredStores: stores,
         manualCheckCooldownMinutes: Number(cooldown),
         maxDailyAiCalls: Number(maxCalls),
+        rediscoverEveryDays: Number(rediscoverDays),
         cashbackSources,
         notifyEmail,
         notifyEnabled,
@@ -78,9 +81,20 @@ export default function SettingsPage() {
       <div className="form-grid">
         <ZipCodeField value={zip} onChange={setZip} />
         <div className="field">
-          <label>AI checks / day used today</label>
-          <input type="text" value={`${settings.aiCallsToday || 0} of ${maxCalls}`} readOnly
-            style={{ color: 'var(--ink-3)' }} />
+          <label>Billable web searches this month</label>
+          {/* The only thing that actually costs money. Daily checks re-read pages
+              ZeroTide already knows and are free, so this counter is what to watch. */}
+          <input
+            type="text"
+            readOnly
+            value={`${settings.groundedSearchesThisMonth || 0} of ${settings.freeSearchesPerMonth || 5000} free`}
+            style={{ color: (settings.estimatedMonthCostUsd || 0) > 0 ? 'var(--warn)' : 'var(--good)' }}
+          />
+          <div className="hint">
+            {(settings.estimatedMonthCostUsd || 0) > 0
+              ? `Past the free allowance — about $${settings.estimatedMonthCostUsd.toFixed(2)} so far this month.`
+              : `Free so far. ${settings.aiCallsToday || 0} of ${maxCalls} searching checks used today.`}
+          </div>
         </div>
         <StoreListEditor stores={stores} onChange={setStores} />
         <CashbackEditor sources={cashbackSources} onChange={setCashbackSources} />
@@ -93,9 +107,19 @@ export default function SettingsPage() {
             onChange={(e) => setCooldown(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="maxcalls">Max AI checks per day</label>
+          <label htmlFor="maxcalls">Max searching checks per day</label>
           <input id="maxcalls" type="number" min={1} max={500} value={maxCalls}
             onChange={(e) => setMaxCalls(e.target.value)} />
+          <div className="hint">Caps only the billable web searches, not the free daily page re-reads.</div>
+        </div>
+        <div className="field">
+          <label htmlFor="rediscover">Look for new sellers every (days)</label>
+          <input id="rediscover" type="number" min={0} max={365} value={rediscoverDays}
+            onChange={(e) => setRediscoverDays(e.target.value)} />
+          <div className="hint">
+            Between sweeps, ZeroTide re-reads the pages it already found — free. Raise this to spend
+            less, lower it to catch new sellers sooner. 0 turns sweeps off.
+          </div>
         </div>
       </div>
 

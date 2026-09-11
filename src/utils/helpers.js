@@ -51,6 +51,47 @@ export function shopUrl(query, store) {
   return 'https://www.google.com/search?q=' + encodeURIComponent(q);
 }
 
+// ── Provenance ──────────────────────────────────────────────────────────────
+// Where a stored price came from. The distinction that matters to the user is
+// whether ZeroTide read the number off the seller's own page or is relaying a
+// search result it hasn't confirmed yet.
+const PROVENANCE_META = {
+  'shopify-json': { label: "read from the store's own product data", verified: true },
+  'json-ld': { label: 'read from the product page', verified: true },
+  opengraph: { label: 'read from the product page', verified: true },
+  microdata: { label: 'read from the product page', verified: true },
+  'llm-page-read': { label: 'read from the product page', verified: true },
+  'http-304': { label: 'page unchanged since the last check', verified: true },
+  'grounded-search': { label: "from a web search — not confirmed on the store's page", verified: false },
+};
+
+export function provenanceMeta(provenance) {
+  if (!provenance || !provenance.method) return null;
+  const meta = PROVENANCE_META[provenance.method];
+  if (!meta) return null;
+  return { ...meta, verified: meta.verified && provenance.verified !== false, readAt: provenance.readAt || null };
+}
+
+// How the "usual range" band was arrived at — measured from our own checks, or
+// still an estimate. Labelling this keeps the chart honest while history builds.
+export function bandSourceLabel(source, observedDays) {
+  if (source === 'observed') return `usual range · measured over ${observedDays} days`;
+  if (source === 'partial') return `usual range · ${observedDays} days so far`;
+  return 'usual range · estimated';
+}
+
+export function timeAgo(iso) {
+  if (!iso) return '';
+  const then = new Date(iso);
+  if (isNaN(then)) return '';
+  const mins = Math.round((Date.now() - then.getTime()) / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
 export function sumSavings(intentions) {
   return intentions.reduce((acc, it) => {
     const s = it.savings;

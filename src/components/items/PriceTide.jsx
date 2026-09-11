@@ -3,7 +3,7 @@ import {
   ResponsiveContainer, AreaChart, Area, ReferenceLine, ReferenceArea, YAxis, Tooltip,
 } from 'recharts';
 import { useShopping } from '../../contexts/ShoppingContext';
-import { money, formatShortDate, dipLabel } from '../../utils/helpers';
+import { money, formatShortDate, dipLabel, bandSourceLabel } from '../../utils/helpers';
 
 function TideTooltip({ active, payload }) {
   if (!active || !payload || !payload.length) return null;
@@ -104,7 +104,12 @@ export default function PriceTide({ intention }) {
       <div className="legend">
         <span><i className="wave" />price</span>
         {typeof target === 'number' && <span><i className="tgt" />your price</span>}
-        {typeof low === 'number' && <span><i className="band" />usual range</span>}
+        {typeof low === 'number' && (
+          <span title={ctx.reasoning || ''}>
+            <i className="band" />
+            {bandSourceLabel(ctx.source, ctx.observedDays)}
+          </span>
+        )}
       </div>
     </div>
   );

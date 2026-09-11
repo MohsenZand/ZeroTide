@@ -79,10 +79,10 @@ export function ShoppingProvider({ children }) {
     notify('Paused.', 'info');
   }, [loadDashboard, notify]);
 
-  const checkNow = useCallback(async (id) => {
+  const checkNow = useCallback(async (id, rediscover = false) => {
     setCheckingIds((prev) => ({ ...prev, [id]: true }));
     try {
-      const res = await shoppingService.checkIntentionNow(id);
+      const res = await shoppingService.checkIntentionNow(id, rediscover);
       // Merge fresh verdict/currentBest into the item.
       setIntentions((prev) =>
         prev.map((it) =>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Plus, Clock, Eye, RefreshCw, ExternalLink, ShoppingBag, Trash2, Pencil, Ticket, Wallet, Tag, ChevronDown, Store, Repeat, BadgeCheck, Play, Pause, Truck } from 'lucide-react';
+import { Check, Plus, Clock, Eye, RefreshCw, ExternalLink, ShoppingBag, Trash2, Pencil, Ticket, Wallet, Tag, ChevronDown, Store, Repeat, BadgeCheck, Play, Pause, Truck, Search } from 'lucide-react';
 import { useShopping } from '../../contexts/ShoppingContext';
 import { money, formatAsOf, verdictMeta, shopUrl } from '../../utils/helpers';
 import PriceTide from './PriceTide';
@@ -142,8 +142,15 @@ export default function ItemCard({ intention, onDelete }) {
                   {hasRealLink ? 'Open product page' : 'See where to buy'} <ExternalLink size={13} />
                 </a>
               )}
-              <button className="act" onClick={() => checkNow(intention.id)} disabled={checking}>
+              {/* Re-reads the pages ZeroTide already knows — free. */}
+              <button className="act" onClick={() => checkNow(intention.id)} disabled={checking}
+                title="Re-read the product pages ZeroTide already found (free)">
                 {checking ? <span className="spinner" /> : <RefreshCw size={13} />} {checking ? 'Checking…' : 'Check now'}
+              </button>
+              {/* Spends a web search to hunt for sellers we haven't seen. */}
+              <button className="act" onClick={() => checkNow(intention.id, true)} disabled={checking}
+                title="Search the web again for new or cheaper sellers (uses one billable search)">
+                <Search size={13} /> Search again
               </button>
               <button className="act" onClick={() => markBought(intention.id)}>
                 <ShoppingBag size={13} /> I bought it

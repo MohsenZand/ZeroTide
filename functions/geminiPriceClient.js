@@ -16,9 +16,18 @@ const logger = require("firebase-functions/logger");
 
 // Full flash (not lite): lite is too weak at the agentic work — reading the right
 // page, matching the exact size, and returning a real product URL — which regressed
-// price accuracy and links. Grounding (the main cost) is billed per request either
-// way; the daily cap bounds spend. Rolling "latest" alias avoids deprecation.
-const MODEL = "gemini-flash-latest";
+// price accuracy and links.
+//
+// PINNED, not a rolling alias, and that is deliberate: Search grounding is priced
+// per model family, and Gemini 3.x carries 5,000 free grounded search requests per
+// month (pooled across 3.x models) with $14/1,000 after, where 2.5 bills $35/1,000.
+// `gemini-flash-latest` gave no control over which side of that line we landed on.
+// Bump this knowingly when a newer 3.x flash ships.
+//
+// Note grounding bills each search query the model *issues*, not each request, so
+// one agentic lookup can cost several. That is why discovery is now rare: the daily
+// monitoring path (priceExtract.js) never calls this function at all.
+const MODEL = "gemini-3.8-flash";
 
 function buildPricePrompt(intention, storeNames, zipCode, todayStr, cashbackSources) {
   const cbList = Array.isArray(cashbackSources) ? cashbackSources.filter(Boolean) : [];
@@ -271,6 +280,27 @@ async function callGeminiForIntention({ intention, storeNames, zipCode, apiKey, 
     },
   });
 
+  // ── What this call actually cost ─────────────────────────────────────────
+  // Grounding is billed per search query issued, so the only honest measure of
+  // spend is how many queries came back in groundingMetadata — not the number of
+  // requests we made. Surfaced so Settings can show the month against the free
+  // 5,000 rather than leaving the user to discover it on an invoice.
+  const grounding = response.candidates?.[0]?.groundingMetadata || {};
+  const searchQueries = grounding.webSearchQueries || grounding.web_search_queries || [];
+  const usage = {
+    model: MODEL,
+    searchCount: Array.isArray(searchQueries) ? searchQueries.length : 0,
+    searchQueries: Array.isArray(searchQueries) ? searchQueries.slice(0, 10) : [],
+    promptTokens: response.usageMetadata?.promptTokenCount ?? null,
+    outputTokens: response.usageMetadata?.candidatesTokenCount ?? null,
+  };
+  logger.info("Grounded discovery call", {
+    item: intention.title,
+    model: MODEL,
+    billableSearches: usage.searchCount,
+    promptTokens: usage.promptTokens,
+  });
+
   const rawText = response.text;
   if (!rawText) throw new Error("Empty response from Gemini");
 
@@ -331,6 +361,18 @@ async function callGeminiForIntention({ intention, storeNames, zipCode, apiKey, 
         sourceTitle,
         howToGetPrice: r.howToGetPrice || null,
         notes: r.notes || null,
+        // Discovery figures are the model's reading of a page, not ours. They are
+        // marked unverified until the monitoring path re-reads the winner's page
+        // directly (see confirmWinnerFromPage in priceRefresh.js).
+        provenance: {
+          method: "grounded-search",
+          model: MODEL,
+          readAt: new Date().toISOString(),
+          evidenceUrl: sourceUrl,
+          snippet: null,
+          verified: false,
+          grounded: true,
+        },
       };
     });
 
@@ -351,6 +393,7 @@ async function callGeminiForIntention({ intention, storeNames, zipCode, apiKey, 
     asOfDate: parsed.asOfDate || todayStr,
     results,
     priceContext,
+    usage,
   };
 }
 

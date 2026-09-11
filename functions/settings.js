@@ -5,6 +5,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { assertOwner } = require("./auth");
+const { summarizeUsage } = require("./aiBudget");
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -20,6 +21,10 @@ const DEFAULTS = {
   ],
   manualCheckCooldownMinutes: 20,
   maxDailyAiCalls: 20,
+  // Daily checks just re-read the product pages we already know, which costs
+  // nothing. This is how often we additionally pay for a grounded web search to
+  // look for sellers we have never seen. 0 disables the sweep entirely.
+  rediscoverEveryDays: 30,
   scheduledRefreshHour: 7,
   timezone: "America/New_York",
   notifyEmail: null,
@@ -80,6 +85,9 @@ exports.updateSettings = onCall(opts, async (request) => {
   }
   if (manualCheckCooldownMinutes !== undefined) patch.manualCheckCooldownMinutes = clampInt(manualCheckCooldownMinutes, 0, 240);
   if (maxDailyAiCalls !== undefined) patch.maxDailyAiCalls = clampInt(maxDailyAiCalls, 1, 500);
+  if (request.data.rediscoverEveryDays !== undefined) {
+    patch.rediscoverEveryDays = clampInt(request.data.rediscoverEveryDays, 0, 365);
+  }
   if (scheduledRefreshHour !== undefined) patch.scheduledRefreshHour = clampInt(scheduledRefreshHour, 0, 23);
   if (timezone !== undefined) patch.timezone = String(timezone).slice(0, 64);
 
@@ -102,7 +110,10 @@ function publicSettings(s) {
     notifyEmail: s.notifyEmail || null,
     notifyEnabled: Boolean(s.notifyEnabled),
     cashbackSources: Array.isArray(s.cashbackSources) ? s.cashbackSources : DEFAULTS.cashbackSources,
+    rediscoverEveryDays: typeof s.rediscoverEveryDays === "number" ? s.rediscoverEveryDays : DEFAULTS.rediscoverEveryDays,
     aiCallsToday: s.aiCallsToday || 0,
+    // Actual billable usage: grounded searches against the monthly free pool.
+    ...summarizeUsage(s, s.timezone),
   };
 }
 

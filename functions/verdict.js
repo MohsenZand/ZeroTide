@@ -154,6 +154,11 @@ function evaluate({ intention, aiResult, history }) {
     typicalLow: ctx.typicalLow,
     typicalHigh: ctx.typicalHigh,
     dealFrequency: ctx.dealFrequency,
+    // Where the number came from, so the UI never has to present a read price
+    // and an estimated one as if they were equally solid.
+    provenance: r.provenance || null,
+    contextSource: ctx.source || "estimated",
+    observedDays: ctx.observedDays || 0,
   };
 
   // ── Verdict ──────────────────────────────────────────────────────────────
@@ -222,6 +227,7 @@ function buildStoreList(priced, allResults) {
     sourceTitle: result.sourceTitle,
     howToGetPrice: result.howToGetPrice || null,
     notes: result.notes,
+    provenance: result.provenance || null,
   }));
   // Comparable (right size) first, cheapest first; wrong-size found ones next; not-found last.
   found.sort((a, b) => {

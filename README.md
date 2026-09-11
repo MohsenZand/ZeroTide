@@ -17,7 +17,7 @@ It runs **privately, for you**: a single-owner app locked to your Google account
 
 Sign-in is **owner-only by design**: it keeps the app private and controls AI cost, so the public URL shows the sign-in screen. To try it yourself, deploy your own instance (see [Setup](#setup)).
 
-> **Heads-up on cost:** the AI looks up *live* prices using Google Search grounding, which is billed per request by Google (it is not free). ZeroTide minimizes this (a cheap model, a hard daily call cap, few page reads), but "free" here means "pennies at personal scale," not zero. See [Cost & billing](#cost--billing).
+> **Heads-up on cost:** finding *where* an item is sold uses Google Search grounding, which Google bills per search query. Checking *what it costs today* does not. ZeroTide re-reads the product pages it already knows with a plain HTTP GET. Because searching is rare and re-reading is daily, personal-scale usage normally stays inside Gemini's monthly free grounding allowance. See [Cost & billing](#cost--billing).
 
 ---
 
@@ -43,17 +43,17 @@ Each item shows its true delivered price, a step-by-step breakdown (list price, 
 - **"Maybe" prices**: every working promo code it finds, each as a clickable *code → ~$price* suggestion to verify at checkout.
 - **Per-store comparison**: see every store's price, deals, and links; the manufacturer's official site is flagged.
 - **Exact-size matching**: wrong-size listings are excluded from the best price and flagged.
-- **Price-tide chart**: each item's price over time, with your target and its usual range.
+- **Price-tide chart**: each item's price over time, with your target and its usual range measured from ZeroTide's own recorded checks.
 - **Buy-now email digest**: a free Gmail notification when something hits your price (optional).
 - **Recurring items**: set a rebuy interval; buying pauses the item until the next cycle.
 - **Owner-only**: Google sign-in locked to your email(s); everyone else is rejected.
-- **Configurable**: ZIP, preferred stores, cashback programs you're enrolled in, daily AI-call cap.
+- **Configurable**: ZIP, preferred stores, cashback programs you're enrolled in, and how often to spend a web search looking for new sellers.
 
 ## How it works
 
 - **Frontend:** React + Vite + Tailwind, deployed to Firebase Hosting.
 - **Backend:** Firebase Cloud Functions (Node 20, Gen 2). Firestore is fully locked to direct client access; everything goes through callable functions using the Admin SDK.
-- **AI:** Google Gemini (`gemini-flash-lite-latest`) with the `googleSearch` + `urlContext` tools, so the model both searches **and reads pages**. The verdict/true-price math is deterministic code, not the LLM.
+- **AI:** Google Gemini, on two separate paths. *Discovery* (rare) uses `gemini-3.8-flash` with the `googleSearch` + `urlContext` tools to find who sells an item. *Monitoring* (daily) skips the model wherever it can: it fetches the known product page and parses the retailer's own structured data, falling back to `gemini-3.5-flash-lite` reading the condensed page **with no tools at all**. The verdict/true-price math is deterministic code, not the LLM.
 - **Auth:** Firebase Authentication (Google), gated server-side to an owner allowlist.
 - **Email:** Gmail SMTP via nodemailer (optional).
 
@@ -63,15 +63,29 @@ flowchart LR
     FE -->|callable functions| GUARD{{owner-only auth guard}}
     GUARD --> FN[Cloud Functions]
     FN <--> FS[(Firestore, functions only)]
-    FN -->|daily and on-demand| AGENT
+    FN -->|daily and on-demand| ROUTE{Do we already know<br/>a page for this item?}
 
-    subgraph AGENT [Agentic price lookup]
+    ROUTE -->|yes: the usual case| MON
+    ROUTE -->|no, or periodic sweep| DISC
+
+    subgraph MON [Monitor - free]
+      direction TB
+      M1[GET the known product page] --> M2[Structured data:<br/>Shopify JSON / schema.org / OpenGraph]
+      M2 -->|none published| M3[Cheap model reads<br/>condensed page, no tools]
+      M3 --> M4{{Does the number appear<br/>in the page bytes?}}
+    end
+
+    subgraph DISC [Discover - billed]
       direction TB
       S[1. Google Search, find candidates] --> R[2. urlContext, read product pages]
       R --> X[3. extract price, size, deals]
+      X --> C[4. re-read each winner's own page;<br/>the page overrides the search]
     end
 
-    X --> V[Verdict engine, true price and buy/wait]
+    M2 --> V
+    M4 --> V
+    C --> V
+    V[Verdict engine<br/>true price + buy/wait<br/>band measured from own history]
     V --> FS
     V -->|item hits your price| MAIL[Gmail digest]
     MAIL --> U
@@ -87,7 +101,9 @@ Things in here worth a closer look:
 - **LLM proposes, code decides.** The AI only returns structured facts (prices, discounts, shipping, links). A deterministic **verdict engine** computes the true price and the buy/wait decision, so pricing is predictable, testable, and not at the mercy of the model.
 - **Trust-first price modelling.** The headline "absolute" price uses only page-verifiable discounts (sale price, subscription, your enrolled cashback, shipping). Unverifiable promo codes are never silently applied; they're surfaced as opt-in "maybe" prices. Coupon + subscription are never stacked when they can't combine.
 - **Security without user accounts.** Firestore denies all direct client access; every read/write is a callable function using the Admin SDK, gated to an owner-email allowlist. A public URL that's safe to leave up.
-- **Cost engineering.** Live web grounding is billed per request, so the design leans on a cheap model, ≤2 page reads per lookup, a hard daily call cap, per-item cooldowns, and one scheduled daily batch, keeping real-world spend at pennies.
+- **Discovery and monitoring are separated.** "Where is this sold?" needs a web search; "what does that page say today?" needs an HTTP GET. Treating them as one task meant paying discovery prices thirty times a month per item. Now a grounded sweep runs only when an item is new, when no page is readable, or on a configurable interval (default 30 days) to catch sellers that appeared since, and the daily check costs nothing.
+- **Prices are read, not recalled.** A price is only stored if it can be pointed at: Shopify's product JSON, schema.org/OpenGraph markup, or, when a page publishes none of that, a cheap model reading the fetched page, with every figure it returns checked to literally occur in the bytes the retailer served. Numbers that fail that check are dropped rather than reported. After a grounded search, each discovered price is re-read from the seller's own page; where search and page disagree, the page wins.
+- **The price band is measured, not estimated.** `typicalLow` / `typicalHigh` / dip cadence are computed from ZeroTide's own recorded history once there are enough observations, and the UI labels the band as measured or estimated so the two are never confused. The trough price is the median of days that actually dipped. A time-based percentile sits *above* every real dip and would hide the exact moments the app exists to catch.
 - **Defensive data pipeline.** JSON-from-LLM is fence-stripped and schema-validated; links are host-checked against the store and re-verified with a real fetch (dead 404s fall back to a search); undefined values can't crash a Firestore write.
 
 ---
@@ -98,7 +114,7 @@ Things in here worth a closer look:
 - A **Google account**
 - The **Firebase CLI**: `npm install -g firebase-tools`
 - A **Firebase project on the Blaze (pay-as-you-go) plan**: Cloud Functions require it. (Blaze has a generous free tier; ZeroTide's usage is tiny.)
-- A **Gemini API key** with billing enabled (Google Search grounding is a paid feature; see [Cost & billing](#cost--billing)).
+- A **Gemini API key** with billing enabled. Google Search grounding requires it even though 3.x models include a monthly free allowance you may never exceed. See [Cost & billing](#cost--billing).
 - *(Optional)* A **Gmail account with an App Password** for email notifications.
 
 ## Setup
@@ -142,7 +158,7 @@ ZEROTIDE_OWNER_EMAILS=you@gmail.com
 
 ### 5. Gemini API key
 
-Create a key at [Google AI Studio](https://aistudio.google.com/apikey) **in your Firebase project**, and make sure that project has **billing enabled** (Search grounding requires the paid tier). Then store it as a secret:
+Create a key at [Google AI Studio](https://aistudio.google.com/apikey) **in your Firebase project**, and make sure that project has **billing enabled** (Search grounding requires it; the monthly free allowance still applies). Then store it as a secret:
 ```bash
 firebase functions:secrets:set GEMINI_API_KEY
 ```
@@ -180,17 +196,32 @@ Real Gemini/Gmail calls still go out over the network under the emulator; that's
 
 ## Cost & billing
 
-The **only meaningful cost is Gemini's Google Search grounding**, billed per request. Everything else (Cloud Functions, Firestore, Hosting, Gmail) sits comfortably in free tiers at personal scale.
+The **only meaningful cost is Gemini's Google Search grounding**. Everything else (Cloud Functions, Firestore, Hosting, Gmail) sits comfortably in free tiers at personal scale.
 
-ZeroTide minimizes AI spend by:
-- using the low-cost **`gemini-flash-lite-latest`** model,
-- reading **at most ~2 pages** per lookup,
-- checking a small set of priority stores,
-- a hard **daily AI-call cap** (`maxDailyAiCalls`, default 20, editable in Settings),
+Two things are worth knowing about how grounding is billed:
+
+1. It is charged per **search query the model issues**, not per request: one agentic lookup can issue several.
+2. Gemini 3.x models include a **monthly free allowance** of grounded searches, so staying under it costs nothing. This is why the model is **pinned** to a 3.x ID rather than a rolling `-latest` alias: the alias gave no control over which pricing applies.
+
+ZeroTide keeps spend near zero by only searching when searching is the actual question:
+
+| Path | When it runs | What it costs |
+| --- | --- | --- |
+| **Monitor**: re-read known product pages | Almost every check, including the daily batch | Structured data: **$0**. Otherwise input tokens only (a condensed page is ~400 to 3,000 tokens), no grounding. |
+| **Discover**: grounded web search | New item, no readable page, or the periodic sweep (`rediscoverEveryDays`, default 30) | Billed grounded searches. |
+
+Further controls:
+- `rediscoverEveryDays`: how often to pay for a fresh seller sweep (0 disables it),
+- `maxDailyAiCalls`: a hard cap on *searching* checks per day (page re-reads are not capped, because they are free),
 - a per-item cooldown on manual "Check now",
-- and a once-daily scheduled refresh.
+- a once-daily scheduled refresh,
+- conditional requests (ETag / If-Modified-Since), so an unchanged page returns `304` and needs no parsing at all.
 
-Each price check = one grounded request. **Watch your actual usage** in the Google Cloud billing console, verify current grounding pricing at [ai.google.dev/pricing](https://ai.google.dev/pricing), and set a **billing budget alert**. Lower the daily cap and track fewer items to spend less.
+Settings shows **grounded searches used this month against the free allowance**, plus an estimated cost if you go past it. Still, **watch your actual usage** in the Google Cloud billing console, verify current grounding pricing at [ai.google.dev/pricing](https://ai.google.dev/pricing), and set a **billing budget alert**.
+
+### Fetch etiquette
+
+The monitoring path fetches only product URLs you are explicitly tracking, at most one page per store per item per day. It identifies itself in the `User-Agent` (set `ZEROTIDE_CONTACT_URL` to advertise a contact page), caps response size, limits concurrency, and uses conditional requests so unchanged pages cost the retailer a `304`. Please keep it that way if you fork this.
 
 ## Security model
 
@@ -204,7 +235,7 @@ Each price check = one grounded request. **Watch your actual usage** in the Goog
 - **ZIP code**: for local pricing/shipping.
 - **Preferred stores**: priorities (search still spans the web).
 - **Your cashback programs**: only cashback you can actually redeem counts toward the true price.
-- **Daily AI-call cap** and **manual-check cooldown**: cost controls.
+- **Daily searching-check cap**, **"look for new sellers every N days"**, and **manual-check cooldown**: cost controls.
 - **Notification email** + toggle: Buy-now digest.
 
 ## Project structure
@@ -216,9 +247,13 @@ Each price check = one grounded request. **Watch your actual usage** in the Goog
 │   ├── pages/               # Dashboard, Settings
 │   └── services/            # callable-function wrappers
 ├── functions/               # Cloud Functions (Gen 2, CommonJS)
-│   ├── geminiPriceClient.js # agentic Gemini lookup (search + read pages)
+│   ├── geminiPriceClient.js # DISCOVERY: grounded Gemini lookup (search + read pages)
+│   ├── pageFetch.js         # polite fetch, structured-data extraction, page condensing
+│   ├── priceExtract.js      # MONITORING: read a known page (free tier -> cheap model)
+│   ├── priceStats.js        # price band + dip cadence measured from recorded history
+│   ├── aiBudget.js          # daily cap + grounded-search accounting vs the free allowance
 │   ├── verdict.js           # deterministic true-price + verdict engine
-│   ├── priceRefresh.js      # scheduled batch + on-demand "check now"
+│   ├── priceRefresh.js      # routes monitor vs discover; scheduled batch + "check now"
 │   ├── intentions.js        # watch-list CRUD, snooze
 │   ├── settings.js          # settings CRUD
 │   ├── notify.js            # Gmail digest

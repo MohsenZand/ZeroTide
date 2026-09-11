@@ -42,7 +42,9 @@ export const shoppingService = {
   markBought: (id) => invoke(fns.markBought, { id }),
   resumeIntention: (id) => invoke(fns.resumeIntention, { id }),
   snoozeIntention: (id, days) => invoke(fns.snoozeIntention, { id, days }),
-  checkIntentionNow: (id) => invoke(fns.checkIntentionNow, { id }),
+  // rediscover=true forces a fresh (billable) web search for new sellers;
+  // the default just re-reads the product pages we already know, for free.
+  checkIntentionNow: (id, rediscover = false) => invoke(fns.checkIntentionNow, { id, rediscover }),
   getSettings: () => invoke(fns.getSettings),
   updateSettings: (data) => invoke(fns.updateSettings, data),
   sendTestEmail: () => invoke(fns.sendTestEmail),
